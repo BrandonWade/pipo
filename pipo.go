@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 )
 
 var (
+	slk          *slack.Client
 	rtm          *slack.RTM
 	games        GameList
 	gameDuration = 20 * time.Minute
@@ -24,6 +26,7 @@ const (
 	botID           = "U3RD48GMC"
 	botAvatar       = "https://avatars.slack-edge.com/2017-01-12/126139559856_47ebe28f7381fdbb392d_original.png"
 	cmdBook         = "book"
+	cmdCancel       = "cancel"
 	cmdBookings     = "bookings"
 	cmdLeaderboards = "leaderboards"
 	cmdStatus       = "status"
@@ -77,54 +80,86 @@ func piporun() {
 	for msg := range rtm.IncomingEvents {
 		switch ev := msg.Data.(type) {
 		case *slack.MessageEvent:
-			if strings.Contains(ev.Text, botName) || strings.Contains(ev.Text, botID) {
-				player1, err := slk.GetUserInfo(ev.Msg.User)
-				if err != nil {
-					log.Println(err)
-					continue
+			regexStr := "^@?pipo(?:\\s(help|bookings))?$"
+			regex := regexp.MustCompile("(?i)" + regexStr)
+			captureGroups := regex.FindAllStringSubmatch(ev.Text, -1)
+			// log.Printf("CAPTUREGROUPS = |%q|", captureGroups)
+
+			if captureGroups != nil {
+				command := captureGroups[0][1]
+
+				if command == cmdHelp {
+					showHelpCommands(ev.Channel)
+				} else if command == cmdBookings {
+					listBookings(ev.Channel)
 				}
+			} else {
+				regexStr2 := "^@?pipo\\s(book|cancel)\\s(<@\\w+>)\\s((?:[0-9]|0[0-9]|1[0-9]|2[0-3]):?(?:[0-5][0-9])?\\s?(?:A\\.?M\\.?|P\\.?M\\.?)?)$"
+				regex2 := regexp.MustCompile("(?i)" + regexStr2)
+				captureGroups2 := regex2.FindAllStringSubmatch(ev.Text, -1)
+				// log.Printf("CAPTUREGROUPS2 = |%q|", captureGroups2)
 
-				tokens := strings.Split(ev.Text, " ")
-				if tokens[0] == botName || tokens[0] == "<@"+botID+">" {
-					if len(tokens) > 1 {
-						command := tokens[1]
+				if captureGroups2 != nil {
+					command2 := captureGroups2[0][1]
+					target := captureGroups2[0][2]
+					time := captureGroups2[0][3]
 
-						if len(tokens) == 2 {
-							if command == cmdHelp {
-								showHelpCommands(ev.Channel)
-							} else if command == cmdBookings {
-								listBookings(ev.Channel)
-							} else if command == cmdLeaderboards {
-								showLeaderboard(ev.Channel)
-							} else if command == cmdStatus {
-								checkTableStatus(ev.Channel)
-							} else {
-								showErrorReponse(ev.Channel)
-							}
-						} else if len(tokens) == 4 && command == cmdBook {
-							startTime, err := parseTime(tokens[3])
-							if err != nil {
-								log.Println(err)
-								showErrorReponse(ev.Channel)
-								continue
-							}
-
-							player2ID := tokens[2][2 : len(tokens[2])-1]
-							player2, err := slk.GetUserInfo(player2ID)
-							if err != nil {
-								log.Println(err)
-								continue
-							}
-
-							createBooking(ev.Channel, player1, player2, startTime)
-						} else {
-							showErrorReponse(ev.Channel)
-						}
-					} else {
-						showHelpCommands(ev.Channel)
+					if command2 == cmdBook {
+						createBooking(ev.Channel, ev.Msg.User, target, time)
+					} else if command2 == cmdCancel {
+						cancelBooking(ev.Channel, ev.Msg.User, target, time)
 					}
 				}
 			}
+
+			// if strings.Contains(ev.Text, botName) || strings.Contains(ev.Text, botID) {
+			// 	player1, err := slk.GetUserInfo(ev.Msg.User)
+			// 	if err != nil {
+			// 		log.Println(err)
+			// 		continue
+			// 	}
+			//
+			// 	tokens := strings.Split(ev.Text, " ")
+			// 	if tokens[0] == botName || tokens[0] == "<@"+botID+">" {
+			// 		if len(tokens) > 1 {
+			// 			command := tokens[1]
+			//
+			// 			if len(tokens) == 2 {
+			// 				if command == cmdHelp {
+			// 					showHelpCommands(ev.Channel)
+			// 				} else if command == cmdBookings {
+			// 					listBookings(ev.Channel)
+			// 				} else if command == cmdLeaderboards {
+			// 					showLeaderboard(ev.Channel)
+			// 				} else if command == cmdStatus {
+			// 					checkTableStatus(ev.Channel)
+			// 				} else {
+			// 					showErrorReponse(ev.Channel)
+			// 				}
+			// 			} else if len(tokens) == 4 && command == cmdBook {
+			// 				startTime, err := parseTime(tokens[3])
+			// 				if err != nil {
+			// 					log.Println(err)
+			// 					showErrorReponse(ev.Channel)
+			// 					continue
+			// 				}
+			//
+			// 				player2ID := tokens[2][2 : len(tokens[2])-1]
+			// 				player2, err := slk.GetUserInfo(player2ID)
+			// 				if err != nil {
+			// 					log.Println(err)
+			// 					continue
+			// 				}
+			//
+			// 				createBooking(ev.Channel, player1, player2, startTime)
+			// 			} else {
+			// 				showErrorReponse(ev.Channel)
+			// 			}
+			// 		} else {
+			// 			showHelpCommands(ev.Channel)
+			// 		}
+			// 	}
+			// }
 		case *slack.RTMError:
 			fmt.Printf("Error: %s\n", ev.Error())
 		case *slack.InvalidAuthEvent:
@@ -146,50 +181,16 @@ func Notify(game *Game) {
 }
 
 func showHelpCommands(channel string) {
-	message := "To check if the table is available right now, just say: ```pipo status```\n\n\n" +
-		"To make a booking, just say: ```pipo book [@opponent] [time]```\n" +
-		"```EXAMPLE: pipo book @pipo 3:15PM```\n\n\n" +
-		"To view all bookings, just say: ```pipo bookings```\n\n\n" +
-		"To view the leaderboards, just say: ```pipo leaderboards```"
+	message := "To view all bookings, just say: \n`pipo bookings`\n\n\n" +
+		"To make a booking, just say: \n`pipo book [@opponent] [time]`\n" +
+		"`EXAMPLE: pipo book @pipo 3:15 PM`\n\n\n" +
+		"To cancel a booking, just say: \n`pipo cancel [@opponent] [time]`\n" +
+		"`EXAMPLE: pipo cancel @pipo 3:15 PM`"
 	postMessage(channel, message, false)
 }
 
 func showErrorReponse(channel string) {
-	message := "Sorry, I don't understand. For a list of commands, just say: ```pipo help```"
-	postMessage(channel, message, false)
-}
-
-func showLeaderboard(channel string) {
-	message := "Coming soon!"
-	postMessage(channel, message, false)
-}
-
-func checkTableStatus(channel string) {
-	/*
-		gameStart := time.Now().UTC()
-		gameEnd := gameStart.Add(gameDuration)
-		message := "Sorry! I'm not sure what the table status is right now..."
-
-		if games.Len() == 0 {
-			message = "It looks like the table is available! I don't have any games booked right now."
-		} else {
-			nextGameStart := games[0].StartTime.UTC()
-			nextGameEnd := games[0].StartTime.UTC().Add(gameDuration)
-
-			if gameEnd.Before(nextGameStart) || gameStart.After(nextGameEnd) {
-				message = "It looks the table is free and there's time for a game right now."
-			} else if gameStart.Before(nextGameStart) && gameEnd.After(nextGameStart) {
-				message = "It doesn't look like there's enough time to play a game right now."
-			} else if (gameStart.After(nextGameStart) && gameStart.Before(nextGameEnd)) ||
-				(gameStart.Equal(nextGameStart) && gameEnd.Equal(nextGameEnd)) {
-				message = "It looks like the table is being used right now."
-			}
-		}
-
-		postMessage(channel, message, false)
-	*/
-
-	message := "Coming soon!"
+	message := "Sorry, I don't understand. For a list of commands, just say:\n `pipo help`"
 	postMessage(channel, message, false)
 }
 
@@ -209,13 +210,31 @@ func listBookings(channel string) {
 	postMessage(channel, message, false)
 }
 
-func createBooking(channel string, user1, user2 *slack.User, startTime time.Time) {
+func createBooking(channel, player, opponent, gameTime string) {
+	user1, err := slk.GetUserInfo(player)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	opponentID := opponent[2 : len(opponent)-1]
+	user2, err := slk.GetUserInfo(opponentID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	startTime, err := parseTime(gameTime)
+	if err != nil {
+		log.Println(err)
+		showErrorReponse(channel)
+		return
+	}
+
 	now := time.Now().UTC().Add(-6 * time.Hour) // Hack to get times in UTC and account for 6 hour difference
 	if startTime.Before(now) {
 		message := "Hey, you can't book a game in the past!"
 		postMessage(channel, message, false)
-		log.Printf("ST = %+v", startTime)
-		log.Printf("NOW = %+v", now)
 		return
 	}
 
@@ -227,7 +246,7 @@ func createBooking(channel string, user1, user2 *slack.User, startTime time.Time
 		if (startTime.After(game.StartTime) && startTime.Before(gameEndTime)) ||
 			(newEndTime.After(game.StartTime) && newEndTime.Before(gameEndTime)) ||
 			(startTime.Equal(game.StartTime) && newEndTime.Equal(gameEndTime)) {
-			message := "Unfortunately, there was a booking conflict. To see a list of bookings, just say: ```pipo bookings```"
+			message := "Unfortunately, there was a booking conflict. To see a list of bookings, just say:\n `pipo bookings`"
 			postMessage(channel, message, false)
 			return
 		}
@@ -258,6 +277,9 @@ func createBooking(channel string, user1, user2 *slack.User, startTime time.Time
 
 	message := "Okay! I've made a booking for " + player1.Name + " against " + player2.Name + " at " + formatTime(startTime)
 	postMessage(channel, message, false)
+}
+
+func cancelBooking(channel, player, opponent, gameTime string) {
 }
 
 func parseTime(timeStr string) (time.Time, error) {
