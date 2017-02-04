@@ -6,7 +6,6 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -58,7 +57,7 @@ func sweepGames() {
 		}
 
 		if !game.InProgress && (game.StartTime.Equal(time.Now().Add(3*time.Minute)) || game.StartTime.Before(time.Now().Add(3*time.Minute))) {
-			Notify(game)
+			notify(game)
 		}
 	}
 }
@@ -80,86 +79,43 @@ func piporun() {
 	for msg := range rtm.IncomingEvents {
 		switch ev := msg.Data.(type) {
 		case *slack.MessageEvent:
-			regexStr := "^@?pipo(?:\\s(help|bookings))?$"
-			regex := regexp.MustCompile("(?i)" + regexStr)
-			captureGroups := regex.FindAllStringSubmatch(ev.Text, -1)
-			// log.Printf("CAPTUREGROUPS = |%q|", captureGroups)
+			pipoStr := "^@?pipo$"
+			pipoRegex := regexp.MustCompile("(?i)" + pipoStr)
+			pipoCaptureGroups := pipoRegex.FindAllStringSubmatch(ev.Text, -1)
+			if pipoCaptureGroups != nil {
+				showHelpCommands(ev.Channel)
+				continue
+			}
 
-			if captureGroups != nil {
-				command := captureGroups[0][1]
+			infoStr := "^@?pipo(?:\\s(help|bookings))?$"
+			infoRegex := regexp.MustCompile("(?i)" + infoStr)
+			infoCaptureGroups := infoRegex.FindAllStringSubmatch(ev.Text, -1)
+			if infoCaptureGroups != nil {
+				command := infoCaptureGroups[0][1]
 
 				if command == cmdHelp {
 					showHelpCommands(ev.Channel)
 				} else if command == cmdBookings {
 					listBookings(ev.Channel)
 				}
-			} else {
-				regexStr2 := "^@?pipo\\s(book|cancel)\\s(<@\\w+>)\\s((?:[0-9]|0[0-9]|1[0-9]|2[0-3]):?(?:[0-5][0-9])?\\s?(?:A\\.?M\\.?|P\\.?M\\.?)?)$"
-				regex2 := regexp.MustCompile("(?i)" + regexStr2)
-				captureGroups2 := regex2.FindAllStringSubmatch(ev.Text, -1)
-				// log.Printf("CAPTUREGROUPS2 = |%q|", captureGroups2)
-
-				if captureGroups2 != nil {
-					command2 := captureGroups2[0][1]
-					target := captureGroups2[0][2]
-					time := captureGroups2[0][3]
-
-					if command2 == cmdBook {
-						createBooking(ev.Channel, ev.Msg.User, target, time)
-					} else if command2 == cmdCancel {
-						cancelBooking(ev.Channel, ev.Msg.User, target, time)
-					}
-				}
+				continue
 			}
 
-			// if strings.Contains(ev.Text, botName) || strings.Contains(ev.Text, botID) {
-			// 	player1, err := slk.GetUserInfo(ev.Msg.User)
-			// 	if err != nil {
-			// 		log.Println(err)
-			// 		continue
-			// 	}
-			//
-			// 	tokens := strings.Split(ev.Text, " ")
-			// 	if tokens[0] == botName || tokens[0] == "<@"+botID+">" {
-			// 		if len(tokens) > 1 {
-			// 			command := tokens[1]
-			//
-			// 			if len(tokens) == 2 {
-			// 				if command == cmdHelp {
-			// 					showHelpCommands(ev.Channel)
-			// 				} else if command == cmdBookings {
-			// 					listBookings(ev.Channel)
-			// 				} else if command == cmdLeaderboards {
-			// 					showLeaderboard(ev.Channel)
-			// 				} else if command == cmdStatus {
-			// 					checkTableStatus(ev.Channel)
-			// 				} else {
-			// 					showErrorReponse(ev.Channel)
-			// 				}
-			// 			} else if len(tokens) == 4 && command == cmdBook {
-			// 				startTime, err := parseTime(tokens[3])
-			// 				if err != nil {
-			// 					log.Println(err)
-			// 					showErrorReponse(ev.Channel)
-			// 					continue
-			// 				}
-			//
-			// 				player2ID := tokens[2][2 : len(tokens[2])-1]
-			// 				player2, err := slk.GetUserInfo(player2ID)
-			// 				if err != nil {
-			// 					log.Println(err)
-			// 					continue
-			// 				}
-			//
-			// 				createBooking(ev.Channel, player1, player2, startTime)
-			// 			} else {
-			// 				showErrorReponse(ev.Channel)
-			// 			}
-			// 		} else {
-			// 			showHelpCommands(ev.Channel)
-			// 		}
-			// 	}
-			// }
+			commandStr := "^@?pipo\\s(book|cancel)\\s(<@\\w+>)\\s((?:[0-9]|0[0-9]|1[0-9]|2[0-3])(?:[0-5][0-9]|:[0-5][0-9])?\\s?(?:AM|PM)?)$"
+			commandRegex := regexp.MustCompile("(?i)" + commandStr)
+			commandCaptureGroups := commandRegex.FindAllStringSubmatch(ev.Text, -1)
+			if commandCaptureGroups != nil {
+				command := commandCaptureGroups[0][1]
+				target := commandCaptureGroups[0][2]
+				time := commandCaptureGroups[0][3]
+
+				if command == cmdBook {
+					createBooking(ev.Channel, ev.Msg.User, target, time)
+				} else if command == cmdCancel {
+					cancelBooking(ev.Channel, ev.Msg.User, target, time)
+				}
+				continue
+			}
 		case *slack.RTMError:
 			fmt.Printf("Error: %s\n", ev.Error())
 		case *slack.InvalidAuthEvent:
@@ -169,12 +125,11 @@ func piporun() {
 	}
 }
 
-// Notify - notify users that their game is beginning soon
-func Notify(game *Game) {
+func notify(game *Game) {
 	player1 := *game.Player1
 	player2 := *game.Player2
-	p1Message := "Hey " + player1.Name + "! You have a scheduled ping pong match against " + player2.Name + " at " + formatTime(game.StartTime) + ". Don't be late!"
-	p2Message := "Hey " + player2.Name + "! You have a scheduled ping pong match against " + player1.Name + " at " + formatTime(game.StartTime) + ". Don't be late!"
+	p1Message := fmt.Sprintf("Hey %s! You have a scheduled ping pong match against %s at %s. Don't be late!", player1.Name, player2.Name, formatTime(game.StartTime))
+	p2Message := fmt.Sprintf("Hey %s! You have a scheduled ping pong match against %s at %s. Don't be late!", player2.Name, player1.Name, formatTime(game.StartTime))
 
 	postMessage("@"+player1.ID, p1Message, true)
 	postMessage("@"+player2.ID, p2Message, true)
@@ -231,7 +186,7 @@ func createBooking(channel, player, opponent, gameTime string) {
 		return
 	}
 
-	now := time.Now().UTC().Add(-6 * time.Hour) // Hack to get times in UTC and account for 6 hour difference
+	now := time.Now()
 	if startTime.Before(now) {
 		message := "Hey, you can't book a game in the past!"
 		postMessage(channel, message, false)
@@ -280,65 +235,47 @@ func createBooking(channel, player, opponent, gameTime string) {
 }
 
 func cancelBooking(channel, player, opponent, gameTime string) {
+	// TODO: Implement me!
 }
 
 func parseTime(timeStr string) (time.Time, error) {
-	suffix := ""
-	periodSuffix := ""
-	pmSuffix := false
+	timeRegexStr := "^((?:[0-9]|0[0-9]|1[0-9]|2[0-3])(?:[0-5][0-9]|:[0-5][0-9])?)\\s?(AM|PM)?$"
+	timeRegex := regexp.MustCompile("(?i)" + timeRegexStr)
+	captureGroups := timeRegex.FindAllStringSubmatch(timeStr, -1)
 
-	// Check if AM / PM exists
-	if len(timeStr) > 2 {
-		suffix = strings.ToUpper(timeStr[len(timeStr)-2:])
-	}
+	now := time.Now()
+	timeSegment := captureGroups[0][1]
+	timeSuffix := strings.ToUpper(captureGroups[0][2])
 
-	// Check if A.M. / P.M. exists
-	if len(timeStr) > 4 {
-		periodSuffix = strings.ToUpper(timeStr[len(timeStr)-4:])
-	}
-
-	if suffix == "AM" || suffix == "PM" {
-		timeStr = timeStr[0 : len(timeStr)-2]
-	} else if periodSuffix == "A.M." || periodSuffix == "P.M." {
-		timeStr = timeStr[0 : len(timeStr)-4]
-	}
-	pmSuffix = (suffix == "PM" || periodSuffix == "P.M.")
-
-	if strings.Count(timeStr, ":") == 0 {
-		timeInt, err := strconv.Atoi(timeStr)
-		if err != nil {
-			return time.Date(0, 0, 0, 0, 0, 0, 0, time.UTC), err
+	if !strings.Contains(timeSegment, ":") {
+		if len(timeSegment) == 1 || len(timeSegment) == 2 {
+			timeSegment += ":00"
+		} else if len(timeSegment) == 3 {
+			timeSegment = timeSegment[0:1] + ":" + timeSegment[1:]
+		} else if len(timeSegment) == 4 {
+			timeSegment = timeSegment[0:2] + ":" + timeSegment[2:]
 		}
-
-		if timeStr[0] != '0' && timeInt >= 1 && timeInt <= 9 {
-			timeStr = "0" + timeStr
-		}
-
-		timeStr += ":00:00"
-	} else if strings.Count(timeStr, ":") == 1 && len(timeStr) > 1 {
-		timeStr += ":00"
 	}
 
-	// Get and format the current date
-	currentDate := time.Now().Local()
-	dateStr := currentDate.Format("2006-01-02")
+	if timeSuffix == "" {
+		if now.Hour() >= 12 {
+			timeSuffix = "PM"
+		} else {
+			timeSuffix = "AM"
+		}
+	}
 
-	// Combine the date and time
-	dateTimeStr := dateStr + "T" + timeStr + "Z"
-	dateTime, err := time.Parse(time.RFC3339, dateTimeStr)
+	startTimeStr := fmt.Sprintf("%d-%d-%d %s %s", now.Year(), now.Month(), now.Day(), timeSegment, timeSuffix)
+	startTime, err := time.ParseInLocation("2006-1-2 3:04 PM", startTimeStr, time.Local)
 	if err != nil {
 		return time.Date(0, 0, 0, 0, 0, 0, 0, time.UTC), err
 	}
 
-	if pmSuffix {
-		dateTime = dateTime.Add(12 * time.Hour)
-	}
-
-	return dateTime, nil
+	return startTime, nil
 }
 
 func formatTime(rawTime time.Time) string {
-	return rawTime.Format("15:04")
+	return rawTime.Format("3:04 PM")
 }
 
 func postMessage(channel, message string, asUser bool) {
