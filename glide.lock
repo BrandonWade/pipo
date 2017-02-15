@@ -1,0 +1,10 @@
+hash: 9579d517a30af43de3417a545c56fabb1e0c5861ddc0b8acea82f22bcd5249aa
+updated: 2017-02-14T20:52:46.158539414-06:00
+imports:
+- name: github.com/kidoman/embd
+  version: adc3d473054c5f066be48c9459107f70021c34a4
+  subpackages:
+  - host/rpi
+- name: github.com/nlopes/slack
+  version: 3e8aa5655be613e1d4ce0b740993bb734a2b0f7b
+testImports: []
