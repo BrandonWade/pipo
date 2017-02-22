@@ -36,10 +36,7 @@ func monitor() {
 	}
 	defer p2Btn.Close()
 
-	defaultStartBtn := 0
-	defaultStartLED := 0
-	defaultP1Btn := 1
-	defaultP2Btn := 1
+	go Blink(startLEDPin, blinkChan)
 
 	for {
 		sv, err := startPin.Read()
@@ -47,6 +44,9 @@ func monitor() {
 			log.Println(err)
 		}
 		if defaultSv != sv {
+			// stop the blinking
+			blinkChan <- 1
+			//
 			log.Println("startpin")
 		}
 

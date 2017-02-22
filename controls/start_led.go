@@ -19,8 +19,8 @@ func NewStartLED() (embd.DigitalPin, error) {
 	return pin, nil
 }
 
-// BlinkStartLED ...
-func BlinkStartLED(pin embd.DigitalPin, killChan chan int) error {
+// Blink ...
+func Blink(pin embd.DigitalPin, killChan chan int) error {
 	defer startLEDOff(pin)
 
 	val, err := pin.Read()
