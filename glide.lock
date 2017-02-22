@@ -1,6 +1,13 @@
-hash: d9f68a09782c8236972f8f612ecfdfe0d77c7e82cd9fefe433661558d21eac28
-updated: 2017-02-21T22:28:23.183455232-06:00
+hash: 506cafc2cf031db9d9d458934d51fbe753fdf2ce39a93ec84e82f20b1688c872
+updated: 2017-02-21T23:09:34.433271686-06:00
 imports:
+- name: github.com/golang/glog
+  version: 23def4e6c14b4da8ac2ed8007337bc5eb5007998
+- name: github.com/kidoman/embd
+  version: adc3d473054c5f066be48c9459107f70021c34a4
+  subpackages:
+  - host/generic
+  - host/rpi
 - name: github.com/nlopes/slack
   version: 6519657c021b7add19c4ef48220140cca0b1657b
 - name: golang.org/x/net
