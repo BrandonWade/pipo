@@ -10,7 +10,7 @@ import (
 // NewStartLED ... gets a new start led pin
 func NewStartLED() (embd.DigitalPin, error) {
 
-	pin, err := embd.NewDigitalPin(startLEDPinName)
+	pin, err := embd.NewDigitalPin(startLEDPinDesig)
 	if err != nil {
 		return nil, fmt.Errorf("Error encountered while trying to create start LED pin: %v", err)
 	}

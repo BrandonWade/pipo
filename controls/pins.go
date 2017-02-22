@@ -2,10 +2,10 @@ package controls
 
 import "github.com/kidoman/embd"
 
-const startBtnPinName = "GPIO_14"
-const startLEDPinName = "GPIO_23"
-const p1PinName = "GPIO_15"
-const p2PinName = "GPIO_18"
+const startBtnPinDesig = "GPIO_14"
+const startLEDPinDesig = "GPIO_23"
+const p1PinDesig = "GPIO_15"
+const p2PinDesig = "GPIO_18"
 
 const defaultStartBtnState = embd.Low
 const defaultStartLEDState = embd.Low

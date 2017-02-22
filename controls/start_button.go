@@ -8,7 +8,7 @@ import (
 
 // NewStartButton ... gets a new start led pin
 func NewStartButton() (embd.DigitalPin, error) {
-	pin, err := embd.NewDigitalPin(startBtnPinName)
+	pin, err := embd.NewDigitalPin(startBtnPinDesig)
 	if err != nil {
 		return nil, fmt.Errorf("Error encountered while trying to create start button pin: %v", err)
 	}
