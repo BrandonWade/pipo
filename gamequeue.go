@@ -1,25 +1,25 @@
-package smartpong
+package main
 
 import (
 	"fmt"
 	"sync"
 )
 
-// NintendoGameQueue ...
-type NintendoGameQueue struct {
+// GameQueue ...
+type GameQueue struct {
 	*sync.RWMutex
 	games []*Game
 }
 
-func NewntendoGameQueue() *NintendoGameQueue {
-	return &NintendoGameQueue{
+func NewGameQueue() *GameQueue {
+	return &GameQueue{
 		&sync.RWMutex{},
 		make([]*Game, 0),
 	}
 }
 
 // Push ...
-func (n *NintendoGameQueue) Push(g *Game) (*Game, error) {
+func (n *GameQueue) Push(g *Game) (*Game, error) {
 	n.Lock()
 	defer n.Unlock()
 
@@ -29,7 +29,7 @@ func (n *NintendoGameQueue) Push(g *Game) (*Game, error) {
 }
 
 // Pop ...
-func (n *NintendoGameQueue) Pop() (*Game, error) {
+func (n *GameQueue) Pop() (*Game, error) {
 	n.Lock()
 	defer n.Unlock()
 
@@ -44,7 +44,7 @@ func (n *NintendoGameQueue) Pop() (*Game, error) {
 }
 
 // Peek ...
-func (n *NintendoGameQueue) Peek() (*Game, error) {
+func (n *GameQueue) Peek() (*Game, error) {
 	n.RLock()
 	defer n.RUnlock()
 
@@ -56,7 +56,7 @@ func (n *NintendoGameQueue) Peek() (*Game, error) {
 }
 
 // Len ...
-func (n *NintendoGameQueue) Len() int {
+func (n *GameQueue) Len() int {
 	n.RLock()
 	defer n.RUnlock()
 

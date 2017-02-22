@@ -1,7 +1,4 @@
 package: github.com/BrandonWade/pipo
 import:
-- package: github.com/kidoman/embd
-  subpackages:
-  - host/rpi
 - package: github.com/nlopes/slack
-  version: ^0.0.1
+  version: master

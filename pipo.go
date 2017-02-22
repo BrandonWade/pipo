@@ -60,7 +60,8 @@ func sweepGames() {
 	}
 }
 
-func main() {
+func piporun() {
+
 	slk := slack.New(token)
 
 	_, err := slk.AuthTest()

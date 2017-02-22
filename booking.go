@@ -1,4 +1,4 @@
-package smartpong
+package main
 
 import "time"
 
