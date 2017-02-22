@@ -2,6 +2,7 @@ package controls
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/kidoman/embd"
@@ -23,31 +24,27 @@ func NewStartLED() (embd.DigitalPin, error) {
 func Blink(pin embd.DigitalPin, killChan chan int) error {
 	defer startLEDOff(pin)
 
-	val, err := pin.Read()
-	if err != nil {
-		return err
-	}
-
-	togglePin(val, pin)
+	togglePin(pin)
 
 	t := time.NewTicker(500 * time.Millisecond)
 
 	for {
 		select {
 		case <-t.C:
-			val, err := pin.Read()
-			if err != nil {
-				return err
-			}
-
-			togglePin(val, pin)
+			togglePin(pin)
 		case <-killChan:
 			return nil
 		}
 	}
 }
 
-func togglePin(state int, pin embd.DigitalPin) {
+func togglePin(pin embd.DigitalPin) {
+	state, err := pin.Read()
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
 	if state == embd.Low {
 		pin.Write(embd.High)
 		return
