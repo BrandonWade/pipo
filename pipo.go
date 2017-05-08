@@ -21,15 +21,14 @@ var (
 )
 
 const (
-	botName         = "pipo"
-	botID           = "U3RD48GMC"
-	botAvatar       = "https://avatars.slack-edge.com/2017-01-12/126139559856_47ebe28f7381fdbb392d_original.png"
-	cmdBook         = "book"
-	cmdCancel       = "cancel"
-	cmdBookings     = "bookings"
-	cmdLeaderboards = "leaderboards"
-	cmdStatus       = "status"
-	cmdHelp         = "help"
+	botName     = "pipo"
+	botID       = "U3RD48GMC"
+	botAvatar   = "https://avatars.slack-edge.com/2017-01-12/126139559856_47ebe28f7381fdbb392d_original.png"
+	cmdBook     = "book"
+	cmdCancel   = "cancel"
+	cmdBookings = "bookings"
+	cmdStatus   = "status"
+	cmdHelp     = "help"
 )
 
 func runCleanup() {
@@ -47,16 +46,16 @@ func sweepGames() {
 			game.InProgress = true
 		}
 
-		if game.StartTime.Add(gameDuration).Before(time.Now()) {
+		if game.StartTime.Add(gameDuration).Equal(time.Now()) || game.StartTime.Add(gameDuration).Before(time.Now()) {
 			game.InProgress = false
 
 			// remove it
 			copy(games[i:], games[i+1:])
-			games[len(games)-1] = nil // or the zero value of T
+			games[len(games)-1] = nil
 			games = games[:len(games)-1]
 		}
 
-		if !game.InProgress && (game.StartTime.Equal(time.Now().Add(3*time.Minute)) || game.StartTime.Before(time.Now().Add(3*time.Minute))) {
+		if !game.InProgress && (time.Now().Add(3 * time.Minute).Equal(game.StartTime)) {
 			notify(game)
 		}
 	}
@@ -64,7 +63,7 @@ func sweepGames() {
 
 func piporun() {
 
-	slk := slack.New(token)
+	slk = slack.New(token)
 
 	_, err := slk.AuthTest()
 	if err != nil {
@@ -79,7 +78,7 @@ func piporun() {
 	for msg := range rtm.IncomingEvents {
 		switch ev := msg.Data.(type) {
 		case *slack.MessageEvent:
-			pipoStr := "^@?pipo$"
+			pipoStr := "^(?:<@" + botID + ">|pipo)$"
 			pipoRegex := regexp.MustCompile("(?i)" + pipoStr)
 			pipoCaptureGroups := pipoRegex.FindAllStringSubmatch(ev.Text, -1)
 			if pipoCaptureGroups != nil {
@@ -87,7 +86,7 @@ func piporun() {
 				continue
 			}
 
-			infoStr := "^@?pipo(?:\\s(help|bookings))?$"
+			infoStr := "^(?:<@" + botID + ">|pipo)\\s(help|bookings?)$"
 			infoRegex := regexp.MustCompile("(?i)" + infoStr)
 			infoCaptureGroups := infoRegex.FindAllStringSubmatch(ev.Text, -1)
 			if infoCaptureGroups != nil {
@@ -95,13 +94,13 @@ func piporun() {
 
 				if command == cmdHelp {
 					showHelpCommands(ev.Channel)
-				} else if command == cmdBookings {
+				} else if command == cmdBookings || command == cmdBookings[:len(cmdBookings)-1] {
 					listBookings(ev.Channel)
 				}
 				continue
 			}
 
-			commandStr := "^@?pipo\\s(book|cancel)\\s(<@\\w+>)\\s((?:[0-9]|0[0-9]|1[0-9]|2[0-3])(?:[0-5][0-9]|:[0-5][0-9])?\\s?(?:AM|PM)?)$"
+			commandStr := "^(?:<@" + botID + ">|pipo)\\s(book|cancel)\\s(<@\\w+>)\\s((?:[0-9]|0[0-9]|1[0-9]|2[0-3])(?:[0-5][0-9]|:[0-5][0-9])?\\s?(?:AM|PM)?)$"
 			commandRegex := regexp.MustCompile("(?i)" + commandStr)
 			commandCaptureGroups := commandRegex.FindAllStringSubmatch(ev.Text, -1)
 			if commandCaptureGroups != nil {
@@ -115,6 +114,13 @@ func piporun() {
 					cancelBooking(ev.Channel, ev.Msg.User, target, time)
 				}
 				continue
+			}
+
+			errorStr := "^(?:<@" + botID + ">|pipo)\\s\\w+"
+			errorRegex := regexp.MustCompile("(?i)" + errorStr)
+			errorCaptureGroups := errorRegex.FindAllStringSubmatch(ev.Text, -1)
+			if errorCaptureGroups != nil {
+				showErrorReponse(ev.Channel)
 			}
 		case *slack.RTMError:
 			fmt.Printf("Error: %s\n", ev.Error())
@@ -136,7 +142,8 @@ func notify(game *Game) {
 }
 
 func showHelpCommands(channel string) {
-	message := "To view all bookings, just say: \n`pipo bookings`\n\n\n" +
+	message := "Each game booking is 20 minutes.\n\n\n" +
+		"To view all bookings, just say: \n`pipo bookings`\n\n\n" +
 		"To make a booking, just say: \n`pipo book [@opponent] [time]`\n" +
 		"`EXAMPLE: pipo book @pipo 3:15 PM`\n\n\n" +
 		"To cancel a booking, just say: \n`pipo cancel [@opponent] [time]`\n" +
@@ -235,7 +242,32 @@ func createBooking(channel, player, opponent, gameTime string) {
 }
 
 func cancelBooking(channel, player, opponent, gameTime string) {
-	// TODO: Implement me!
+	startTime, err := parseTime(gameTime)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	cancelled := false
+	opponentID := opponent[2 : len(opponent)-1]
+	for i, game := range games {
+		if game.Player1.ID == player && game.Player2.ID == opponentID && game.StartTime == startTime {
+			copy(games[i:], games[i+1:])
+			games[len(games)-1] = nil
+			games = games[:len(games)-1]
+			cancelled = true
+			break
+		}
+	}
+
+	message := ""
+	if cancelled {
+		message = "Booking cancelled!"
+	} else {
+		message = "Sorry, I could find the game you mentioned."
+	}
+
+	postMessage(channel, message, false)
 }
 
 func parseTime(timeStr string) (time.Time, error) {
@@ -265,13 +297,13 @@ func parseTime(timeStr string) (time.Time, error) {
 		}
 	}
 
-	startTimeStr := fmt.Sprintf("%d-%d-%d %s %s", now.Year(), now.Month(), now.Day(), timeSegment, timeSuffix)
-	startTime, err := time.ParseInLocation("2006-1-2 3:04 PM", startTimeStr, time.Local)
+	fmtTimeStr := fmt.Sprintf("%d-%d-%d %s %s", now.Year(), now.Month(), now.Day(), timeSegment, timeSuffix)
+	fmtTime, err := time.ParseInLocation("2006-1-2 3:04 PM", fmtTimeStr, time.Local)
 	if err != nil {
 		return time.Date(0, 0, 0, 0, 0, 0, 0, time.UTC), err
 	}
 
-	return startTime, nil
+	return fmtTime, nil
 }
 
 func formatTime(rawTime time.Time) string {
@@ -284,4 +316,14 @@ func postMessage(channel, message string, asUser bool) {
 		IconURL:  botAvatar,
 		AsUser:   asUser,
 	})
+}
+
+func printGames() {
+	for _, game := range games {
+		log.Printf("%+v", game.Player1)
+		log.Printf("%+v", game.Player2)
+		log.Printf("%+v", game.StartTime)
+		log.Printf("%+v", game.InProgress)
+	}
+	log.Println("---------------------------------------")
 }
