@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +13,7 @@ import (
 )
 
 var (
+	slk          *slack.Client
 	rtm          *slack.RTM
 	games        GameList
 	gameDuration = 20 * time.Minute
@@ -20,14 +21,14 @@ var (
 )
 
 const (
-	botName         = "pipo"
-	botID           = "U3RD48GMC"
-	botAvatar       = "https://avatars.slack-edge.com/2017-01-12/126139559856_47ebe28f7381fdbb392d_original.png"
-	cmdBook         = "book"
-	cmdBookings     = "bookings"
-	cmdLeaderboards = "leaderboards"
-	cmdStatus       = "status"
-	cmdHelp         = "help"
+	botName     = "pipo"
+	botID       = "U3RD48GMC"
+	botAvatar   = "https://avatars.slack-edge.com/2017-01-12/126139559856_47ebe28f7381fdbb392d_original.png"
+	cmdBook     = "book"
+	cmdCancel   = "cancel"
+	cmdBookings = "bookings"
+	cmdStatus   = "status"
+	cmdHelp     = "help"
 )
 
 func runCleanup() {
@@ -45,24 +46,24 @@ func sweepGames() {
 			game.InProgress = true
 		}
 
-		if game.StartTime.Add(gameDuration).Before(time.Now()) {
+		if game.StartTime.Add(gameDuration).Equal(time.Now()) || game.StartTime.Add(gameDuration).Before(time.Now()) {
 			game.InProgress = false
 
 			// remove it
 			copy(games[i:], games[i+1:])
-			games[len(games)-1] = nil // or the zero value of T
+			games[len(games)-1] = nil
 			games = games[:len(games)-1]
 		}
 
-		if !game.InProgress && (game.StartTime.Equal(time.Now().Add(3*time.Minute)) || game.StartTime.Before(time.Now().Add(3*time.Minute))) {
-			Notify(game)
+		if !game.InProgress && (time.Now().Add(3 * time.Minute).Equal(game.StartTime)) {
+			notify(game)
 		}
 	}
 }
 
 func piporun() {
 
-	slk := slack.New(token)
+	slk = slack.New(token)
 
 	_, err := slk.AuthTest()
 	if err != nil {
@@ -77,53 +78,49 @@ func piporun() {
 	for msg := range rtm.IncomingEvents {
 		switch ev := msg.Data.(type) {
 		case *slack.MessageEvent:
-			if strings.Contains(ev.Text, botName) || strings.Contains(ev.Text, botID) {
-				player1, err := slk.GetUserInfo(ev.Msg.User)
-				if err != nil {
-					log.Println(err)
-					continue
+			pipoStr := "^(?:<@" + botID + ">|pipo)$"
+			pipoRegex := regexp.MustCompile("(?i)" + pipoStr)
+			pipoCaptureGroups := pipoRegex.FindAllStringSubmatch(ev.Text, -1)
+			if pipoCaptureGroups != nil {
+				showHelpCommands(ev.Channel)
+				continue
+			}
+
+			infoStr := "^(?:<@" + botID + ">|pipo)\\s(help|bookings?)$"
+			infoRegex := regexp.MustCompile("(?i)" + infoStr)
+			infoCaptureGroups := infoRegex.FindAllStringSubmatch(ev.Text, -1)
+			if infoCaptureGroups != nil {
+				command := infoCaptureGroups[0][1]
+
+				if command == cmdHelp {
+					showHelpCommands(ev.Channel)
+				} else if command == cmdBookings || command == cmdBookings[:len(cmdBookings)-1] {
+					listBookings(ev.Channel)
 				}
+				continue
+			}
 
-				tokens := strings.Split(ev.Text, " ")
-				if tokens[0] == botName || tokens[0] == "<@"+botID+">" {
-					if len(tokens) > 1 {
-						command := tokens[1]
+			commandStr := "^(?:<@" + botID + ">|pipo)\\s(book|cancel)\\s(<@\\w+>)\\s((?:[0-9]|0[0-9]|1[0-9]|2[0-3])(?:[0-5][0-9]|:[0-5][0-9])?\\s?(?:AM|PM)?)$"
+			commandRegex := regexp.MustCompile("(?i)" + commandStr)
+			commandCaptureGroups := commandRegex.FindAllStringSubmatch(ev.Text, -1)
+			if commandCaptureGroups != nil {
+				command := commandCaptureGroups[0][1]
+				target := commandCaptureGroups[0][2]
+				time := commandCaptureGroups[0][3]
 
-						if len(tokens) == 2 {
-							if command == cmdHelp {
-								showHelpCommands(ev.Channel)
-							} else if command == cmdBookings {
-								listBookings(ev.Channel)
-							} else if command == cmdLeaderboards {
-								showLeaderboard(ev.Channel)
-							} else if command == cmdStatus {
-								checkTableStatus(ev.Channel)
-							} else {
-								showErrorReponse(ev.Channel)
-							}
-						} else if len(tokens) == 4 && command == cmdBook {
-							startTime, err := parseTime(tokens[3])
-							if err != nil {
-								log.Println(err)
-								showErrorReponse(ev.Channel)
-								continue
-							}
-
-							player2ID := tokens[2][2 : len(tokens[2])-1]
-							player2, err := slk.GetUserInfo(player2ID)
-							if err != nil {
-								log.Println(err)
-								continue
-							}
-
-							createBooking(ev.Channel, player1, player2, startTime)
-						} else {
-							showErrorReponse(ev.Channel)
-						}
-					} else {
-						showHelpCommands(ev.Channel)
-					}
+				if command == cmdBook {
+					createBooking(ev.Channel, ev.Msg.User, target, time)
+				} else if command == cmdCancel {
+					cancelBooking(ev.Channel, ev.Msg.User, target, time)
 				}
+				continue
+			}
+
+			errorStr := "^(?:<@" + botID + ">|pipo)\\s\\w+"
+			errorRegex := regexp.MustCompile("(?i)" + errorStr)
+			errorCaptureGroups := errorRegex.FindAllStringSubmatch(ev.Text, -1)
+			if errorCaptureGroups != nil {
+				showErrorReponse(ev.Channel)
 			}
 		case *slack.RTMError:
 			fmt.Printf("Error: %s\n", ev.Error())
@@ -134,62 +131,28 @@ func piporun() {
 	}
 }
 
-// Notify - notify users that their game is beginning soon
-func Notify(game *Game) {
+func notify(game *Game) {
 	player1 := *game.Player1
 	player2 := *game.Player2
-	p1Message := "Hey " + player1.Name + "! You have a scheduled ping pong match against " + player2.Name + " at " + formatTime(game.StartTime) + ". Don't be late!"
-	p2Message := "Hey " + player2.Name + "! You have a scheduled ping pong match against " + player1.Name + " at " + formatTime(game.StartTime) + ". Don't be late!"
+	p1Message := fmt.Sprintf("Hey %s! You have a scheduled ping pong match against %s at %s. Don't be late!", player1.Name, player2.Name, formatTime(game.StartTime))
+	p2Message := fmt.Sprintf("Hey %s! You have a scheduled ping pong match against %s at %s. Don't be late!", player2.Name, player1.Name, formatTime(game.StartTime))
 
 	postMessage("@"+player1.ID, p1Message, true)
 	postMessage("@"+player2.ID, p2Message, true)
 }
 
 func showHelpCommands(channel string) {
-	message := "To check if the table is available right now, just say: ```pipo status```\n\n\n" +
-		"To make a booking, just say: ```pipo book [@opponent] [time]```\n" +
-		"```EXAMPLE: pipo book @pipo 3:15PM```\n\n\n" +
-		"To view all bookings, just say: ```pipo bookings```\n\n\n" +
-		"To view the leaderboards, just say: ```pipo leaderboards```"
+	message := "Each game booking is 20 minutes.\n\n\n" +
+		"To view all bookings, just say: \n`pipo bookings`\n\n\n" +
+		"To make a booking, just say: \n`pipo book [@opponent] [time]`\n" +
+		"`EXAMPLE: pipo book @pipo 3:15 PM`\n\n\n" +
+		"To cancel a booking, just say: \n`pipo cancel [@opponent] [time]`\n" +
+		"`EXAMPLE: pipo cancel @pipo 3:15 PM`"
 	postMessage(channel, message, false)
 }
 
 func showErrorReponse(channel string) {
-	message := "Sorry, I don't understand. For a list of commands, just say: ```pipo help```"
-	postMessage(channel, message, false)
-}
-
-func showLeaderboard(channel string) {
-	message := "Coming soon!"
-	postMessage(channel, message, false)
-}
-
-func checkTableStatus(channel string) {
-	/*
-		gameStart := time.Now().UTC()
-		gameEnd := gameStart.Add(gameDuration)
-		message := "Sorry! I'm not sure what the table status is right now..."
-
-		if games.Len() == 0 {
-			message = "It looks like the table is available! I don't have any games booked right now."
-		} else {
-			nextGameStart := games[0].StartTime.UTC()
-			nextGameEnd := games[0].StartTime.UTC().Add(gameDuration)
-
-			if gameEnd.Before(nextGameStart) || gameStart.After(nextGameEnd) {
-				message = "It looks the table is free and there's time for a game right now."
-			} else if gameStart.Before(nextGameStart) && gameEnd.After(nextGameStart) {
-				message = "It doesn't look like there's enough time to play a game right now."
-			} else if (gameStart.After(nextGameStart) && gameStart.Before(nextGameEnd)) ||
-				(gameStart.Equal(nextGameStart) && gameEnd.Equal(nextGameEnd)) {
-				message = "It looks like the table is being used right now."
-			}
-		}
-
-		postMessage(channel, message, false)
-	*/
-
-	message := "Coming soon!"
+	message := "Sorry, I don't understand. For a list of commands, just say:\n `pipo help`"
 	postMessage(channel, message, false)
 }
 
@@ -209,13 +172,31 @@ func listBookings(channel string) {
 	postMessage(channel, message, false)
 }
 
-func createBooking(channel string, user1, user2 *slack.User, startTime time.Time) {
-	now := time.Now().UTC().Add(-6 * time.Hour) // Hack to get times in UTC and account for 6 hour difference
+func createBooking(channel, player, opponent, gameTime string) {
+	user1, err := slk.GetUserInfo(player)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	opponentID := opponent[2 : len(opponent)-1]
+	user2, err := slk.GetUserInfo(opponentID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	startTime, err := parseTime(gameTime)
+	if err != nil {
+		log.Println(err)
+		showErrorReponse(channel)
+		return
+	}
+
+	now := time.Now()
 	if startTime.Before(now) {
 		message := "Hey, you can't book a game in the past!"
 		postMessage(channel, message, false)
-		log.Printf("ST = %+v", startTime)
-		log.Printf("NOW = %+v", now)
 		return
 	}
 
@@ -227,7 +208,7 @@ func createBooking(channel string, user1, user2 *slack.User, startTime time.Time
 		if (startTime.After(game.StartTime) && startTime.Before(gameEndTime)) ||
 			(newEndTime.After(game.StartTime) && newEndTime.Before(gameEndTime)) ||
 			(startTime.Equal(game.StartTime) && newEndTime.Equal(gameEndTime)) {
-			message := "Unfortunately, there was a booking conflict. To see a list of bookings, just say: ```pipo bookings```"
+			message := "Unfortunately, there was a booking conflict. To see a list of bookings, just say:\n `pipo bookings`"
 			postMessage(channel, message, false)
 			return
 		}
@@ -260,63 +241,73 @@ func createBooking(channel string, user1, user2 *slack.User, startTime time.Time
 	postMessage(channel, message, false)
 }
 
+func cancelBooking(channel, player, opponent, gameTime string) {
+	startTime, err := parseTime(gameTime)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	cancelled := false
+	opponentID := opponent[2 : len(opponent)-1]
+	for i, game := range games {
+		if game.Player1.ID == player && game.Player2.ID == opponentID && game.StartTime == startTime {
+			copy(games[i:], games[i+1:])
+			games[len(games)-1] = nil
+			games = games[:len(games)-1]
+			cancelled = true
+			break
+		}
+	}
+
+	message := ""
+	if cancelled {
+		message = "Booking cancelled!"
+	} else {
+		message = "Sorry, I could find the game you mentioned."
+	}
+
+	postMessage(channel, message, false)
+}
+
 func parseTime(timeStr string) (time.Time, error) {
-	suffix := ""
-	periodSuffix := ""
-	pmSuffix := false
+	timeRegexStr := "^((?:[0-9]|0[0-9]|1[0-9]|2[0-3])(?:[0-5][0-9]|:[0-5][0-9])?)\\s?(AM|PM)?$"
+	timeRegex := regexp.MustCompile("(?i)" + timeRegexStr)
+	captureGroups := timeRegex.FindAllStringSubmatch(timeStr, -1)
 
-	// Check if AM / PM exists
-	if len(timeStr) > 2 {
-		suffix = strings.ToUpper(timeStr[len(timeStr)-2:])
-	}
+	now := time.Now()
+	timeSegment := captureGroups[0][1]
+	timeSuffix := strings.ToUpper(captureGroups[0][2])
 
-	// Check if A.M. / P.M. exists
-	if len(timeStr) > 4 {
-		periodSuffix = strings.ToUpper(timeStr[len(timeStr)-4:])
-	}
-
-	if suffix == "AM" || suffix == "PM" {
-		timeStr = timeStr[0 : len(timeStr)-2]
-	} else if periodSuffix == "A.M." || periodSuffix == "P.M." {
-		timeStr = timeStr[0 : len(timeStr)-4]
-	}
-	pmSuffix = (suffix == "PM" || periodSuffix == "P.M.")
-
-	if strings.Count(timeStr, ":") == 0 {
-		timeInt, err := strconv.Atoi(timeStr)
-		if err != nil {
-			return time.Date(0, 0, 0, 0, 0, 0, 0, time.UTC), err
+	if !strings.Contains(timeSegment, ":") {
+		if len(timeSegment) == 1 || len(timeSegment) == 2 {
+			timeSegment += ":00"
+		} else if len(timeSegment) == 3 {
+			timeSegment = timeSegment[0:1] + ":" + timeSegment[1:]
+		} else if len(timeSegment) == 4 {
+			timeSegment = timeSegment[0:2] + ":" + timeSegment[2:]
 		}
-
-		if timeStr[0] != '0' && timeInt >= 1 && timeInt <= 9 {
-			timeStr = "0" + timeStr
-		}
-
-		timeStr += ":00:00"
-	} else if strings.Count(timeStr, ":") == 1 && len(timeStr) > 1 {
-		timeStr += ":00"
 	}
 
-	// Get and format the current date
-	currentDate := time.Now().Local()
-	dateStr := currentDate.Format("2006-01-02")
+	if timeSuffix == "" {
+		if now.Hour() >= 12 {
+			timeSuffix = "PM"
+		} else {
+			timeSuffix = "AM"
+		}
+	}
 
-	// Combine the date and time
-	dateTimeStr := dateStr + "T" + timeStr + "Z"
-	dateTime, err := time.Parse(time.RFC3339, dateTimeStr)
+	fmtTimeStr := fmt.Sprintf("%d-%d-%d %s %s", now.Year(), now.Month(), now.Day(), timeSegment, timeSuffix)
+	fmtTime, err := time.ParseInLocation("2006-1-2 3:04 PM", fmtTimeStr, time.Local)
 	if err != nil {
 		return time.Date(0, 0, 0, 0, 0, 0, 0, time.UTC), err
 	}
 
-	if pmSuffix {
-		dateTime = dateTime.Add(12 * time.Hour)
-	}
-
-	return dateTime, nil
+	return fmtTime, nil
 }
 
 func formatTime(rawTime time.Time) string {
-	return rawTime.Format("15:04")
+	return rawTime.Format("3:04 PM")
 }
 
 func postMessage(channel, message string, asUser bool) {
@@ -325,4 +316,14 @@ func postMessage(channel, message string, asUser bool) {
 		IconURL:  botAvatar,
 		AsUser:   asUser,
 	})
+}
+
+func printGames() {
+	for _, game := range games {
+		log.Printf("%+v", game.Player1)
+		log.Printf("%+v", game.Player2)
+		log.Printf("%+v", game.StartTime)
+		log.Printf("%+v", game.InProgress)
+	}
+	log.Println("---------------------------------------")
 }
